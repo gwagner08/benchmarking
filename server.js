@@ -8,6 +8,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const CM_BASE = 'https://api.chartmetric.com/api';
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
 let accessToken = null;
 let tokenExpiry = 0;
 
@@ -22,15 +26,45 @@ async function getToken() {
   return accessToken;
 }
 
-app.use(cors());
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+// ── Rate-limited Chartmetric queue ────────────────────────────────────────────
+// Serializes all outbound CM requests with CM_INTERVAL ms between each,
+// which prevents 429s instead of just recovering from them.
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+const CM_INTERVAL = 750; // ms between requests
 
-// Chartmetric GET with one automatic retry on 429.
-// Retry-After may be a unix timestamp (large int) or seconds-to-wait (small int).
+class CmQueue {
+  constructor(interval) {
+    this.interval = interval;
+    this.pending = [];
+    this.running = false;
+  }
+
+  enqueue(fn) {
+    return new Promise((resolve, reject) => {
+      this.pending.push({ fn, resolve, reject });
+      if (!this.running) this._run();
+    });
+  }
+
+  async _run() {
+    this.running = true;
+    while (this.pending.length) {
+      const { fn, resolve, reject } = this.pending.shift();
+      try { resolve(await fn()); } catch (e) { reject(e); }
+      if (this.pending.length) await sleep(this.interval);
+    }
+    this.running = false;
+  }
+}
+
+const cmQueue = new CmQueue(CM_INTERVAL);
+
+// All Chartmetric requests go through here — queued + one retry on 429
 async function cmGet(token, path, params = {}) {
+  return cmQueue.enqueue(() => _cmRequest(token, path, params));
+}
+
+async function _cmRequest(token, path, params = {}) {
   const request = () => axios.get(`${CM_BASE}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
     params,
@@ -41,23 +75,27 @@ async function cmGet(token, path, params = {}) {
   } catch (err) {
     if (err.response?.status !== 429) throw err;
 
+    // Retry-After may be a Unix timestamp or seconds-to-wait
     const raw = err.response.headers['retry-after'];
     let waitMs = 2000;
     if (raw) {
       const n = +raw;
       if (!isNaN(n)) {
-        // Unix timestamp → compute ms until that moment; small number → treat as seconds
-        waitMs = n > 1e9
-          ? Math.max(n * 1000 - Date.now(), 0)
-          : n * 1000;
+        waitMs = n > 1e9 ? Math.max(n * 1000 - Date.now(), 0) : n * 1000;
       }
     }
-    waitMs = Math.max(waitMs, 1500); // always wait at least 1.5 s
+    waitMs = Math.max(waitMs, 2000);
     console.warn(`[cm] 429 on ${path} — retrying in ${(waitMs / 1000).toFixed(1)}s`);
     await sleep(waitMs);
     return request();
   }
 }
+
+// ── Express ───────────────────────────────────────────────────────────────────
+
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Proxy all /cm/* requests to Chartmetric API
 app.get('/cm/*', async (req, res) => {
@@ -81,10 +119,8 @@ app.get('/comps/:artistId', async (req, res) => {
     const artistId = +req.params.artistId;
     const band = req.query.band || 'peer';
 
-    // Step 1: reference artist metadata
-    const metaRes = await axios.get(`${CM_BASE}/artist/${artistId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    // Step 1: reference artist metadata (goes through the queue like everything else)
+    const metaRes = await cmGet(token, `/artist/${artistId}`);
     const artist = metaRes.data?.obj;
     const tags = artist?.tags || artist?.genres || artist?.cm_tags || [];
     const listeners = artist?.sp_monthly_listeners || 0;
@@ -104,7 +140,7 @@ app.get('/comps/:artistId', async (req, res) => {
     const minL = listeners * min;
     const maxL = listeners * max;
 
-    // Step 2: genre-filtered artist candidates — try three endpoints in order
+    // Step 2: genre-filtered candidates — try three endpoints in order
     let candidates = [];
 
     const recentDate = new Date();

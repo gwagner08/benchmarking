@@ -60,21 +60,15 @@ const API = {
     return fetch(`/comps/${artistId}?band=${band}`).then(r => r.json());
   },
 
-  // Fetch platform stats with a small stagger to avoid 429s
+  // Fetch all platform stats — fire in parallel, server queue serializes them
   async getAllStats(id, days = 90) {
-    const delay = ms => new Promise(r => setTimeout(r, ms));
     const settle = fn => fn().then(v => ({ ok: true, v })).catch(() => ({ ok: false }));
-
-    const [spotify, , instagram, , tiktok, , youtube] = await Promise.all([
+    const [spotify, instagram, tiktok, youtube] = await Promise.all([
       settle(() => API.getSpotifyStats(id, days)),
-      delay(250),
       settle(() => API.getInstagramStats(id, days)),
-      delay(250),
       settle(() => API.getTikTokStats(id, days)),
-      delay(250),
       settle(() => API.getYouTubeStats(id, days)),
     ]);
-
     return {
       spotify:   toArray(spotify.ok   ? spotify.v?.obj   : null),
       instagram: toArray(instagram.ok ? instagram.v?.obj : null),
