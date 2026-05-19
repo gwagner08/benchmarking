@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Artist Benchmarking — Powered by Chartmetric</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+<div id="global-loader"></div>
+<div id="toast-container"></div>
+
+<!-- Header -->
+<header class="app-header">
+  <div class="logo">Artist <span>Benchmarking</span></div>
+
+  <div class="search-wrapper">
+    <input id="search-input" type="text" placeholder="Search artists…" autocomplete="off">
+    <div id="search-dropdown"></div>
+  </div>
+
+  <div class="header-controls">
+    <label for="time-range">Range</label>
+    <select id="time-range">
+      <option value="14">14 days</option>
+      <option value="30" selected>30 days</option>
+      <option value="60">60 days</option>
+      <option value="90">90 days</option>
+    </select>
+  </div>
+</header>
+
+<!-- Main -->
+<main class="main">
+
+  <!-- Roster chips -->
+  <div id="roster"></div>
+
+  <!-- Tabs -->
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="overview">Overview</button>
+    <button class="tab-btn" data-tab="streaming">Streaming</button>
+    <button class="tab-btn" data-tab="social">Social</button>
+    <button class="tab-btn" data-tab="momentum">Momentum Score</button>
+  </nav>
+
+  <!-- ── Overview ─────────────────────────────────────────────────────────── -->
+  <div class="tab-pane active" id="tab-overview">
+    <div id="overview-cards"></div>
+
+    <div class="card chart-section">
+      <div class="section-title">Momentum Comparison</div>
+      <div class="chart-wrap" style="height:260px">
+        <canvas id="momentum-bar-chart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Streaming ─────────────────────────────────────────────────────────── -->
+  <div class="tab-pane" id="tab-streaming">
+    <div class="chart-row">
+      <div class="card chart-section">
+        <div class="section-title">Spotify Monthly Listeners</div>
+        <div class="chart-wrap" style="height:300px">
+          <canvas id="chart-sp-listeners"></canvas>
+        </div>
+      </div>
+      <div class="card chart-section">
+        <div class="section-title">Spotify Followers</div>
+        <div class="chart-wrap" style="height:300px">
+          <canvas id="chart-sp-followers"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Social ────────────────────────────────────────────────────────────── -->
+  <div class="tab-pane" id="tab-social">
+    <div class="chart-row" style="margin-bottom:1rem">
+      <div class="card chart-section">
+        <div class="section-title">Instagram Followers</div>
+        <div class="chart-wrap" style="height:280px">
+          <canvas id="chart-ig"></canvas>
+        </div>
+      </div>
+      <div class="card chart-section">
+        <div class="section-title">TikTok Followers</div>
+        <div class="chart-wrap" style="height:280px">
+          <canvas id="chart-tt"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="card chart-section" style="max-width:700px">
+      <div class="section-title">YouTube Subscribers</div>
+      <div class="chart-wrap" style="height:280px">
+        <canvas id="chart-yt"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Momentum Score ────────────────────────────────────────────────────── -->
+  <div class="tab-pane" id="tab-momentum">
+    <div class="chart-row" style="align-items:start">
+
+      <div class="card">
+        <div class="section-title">Score Weights</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:1rem">
+          Adjust the weight of each platform signal. Scores recalculate instantly.
+          Weights don't need to sum to 100 — missing data is excluded proportionally.
+        </p>
+        <div id="weights-editor"></div>
+        <button onclick="recalcMomentum()"
+          style="margin-top:1rem;padding:.5rem 1.25rem;background:var(--primary);
+                 border:none;border-radius:8px;color:#fff;cursor:pointer;font-size:.875rem;font-weight:600">
+          Recalculate
+        </button>
+      </div>
+
+      <div class="card" style="overflow-x:auto">
+        <div class="section-title">Breakdown by Artist</div>
+        <div id="momentum-breakdown"></div>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<!-- App scripts -->
+<script src="/js/api.js"></script>
+<script src="/js/momentum.js"></script>
+<script src="/js/charts.js"></script>
+<script src="/js/app.js"></script>
+
+<script>
+  // Initialize empty state on load
+  renderAll();
+</script>
+
+</body>
+</html>
