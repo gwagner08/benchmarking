@@ -28,32 +28,43 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// Proxy all /cm/* requests to Chartmetric API — retries once on 429
+// Chartmetric GET with one automatic retry on 429.
+// Retry-After may be a unix timestamp (large int) or seconds-to-wait (small int).
+async function cmGet(token, path, params = {}) {
+  const request = () => axios.get(`${CM_BASE}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    params,
+  });
+
+  try {
+    return await request();
+  } catch (err) {
+    if (err.response?.status !== 429) throw err;
+
+    const raw = err.response.headers['retry-after'];
+    let waitMs = 2000;
+    if (raw) {
+      const n = +raw;
+      if (!isNaN(n)) {
+        // Unix timestamp → compute ms until that moment; small number → treat as seconds
+        waitMs = n > 1e9
+          ? Math.max(n * 1000 - Date.now(), 0)
+          : n * 1000;
+      }
+    }
+    waitMs = Math.max(waitMs, 1500); // always wait at least 1.5 s
+    console.warn(`[cm] 429 on ${path} — retrying in ${(waitMs / 1000).toFixed(1)}s`);
+    await sleep(waitMs);
+    return request();
+  }
+}
+
+// Proxy all /cm/* requests to Chartmetric API
 app.get('/cm/*', async (req, res) => {
   try {
     const token = await getToken();
     const cmPath = req.path.replace(/^\/cm/, '');
-
-    let response;
-    try {
-      response = await axios.get(`${CM_BASE}${cmPath}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        params: req.query,
-      });
-    } catch (err) {
-      if (err.response?.status === 429) {
-        const retryAfter = +(err.response.headers['retry-after'] || 2);
-        console.warn(`[proxy] 429 on ${cmPath} — retrying in ${retryAfter}s`);
-        await sleep(retryAfter * 1000);
-        response = await axios.get(`${CM_BASE}${cmPath}`, {
-          headers: { Authorization: `Bearer ${token}` },
-          params: req.query,
-        });
-      } else {
-        throw err;
-      }
-    }
-
+    const response = await cmGet(token, cmPath, req.query);
     res.json(response.data);
   } catch (err) {
     const status = err.response?.status || 500;
@@ -96,31 +107,24 @@ app.get('/comps/:artistId', async (req, res) => {
     // Step 2: genre-filtered artist candidates — try three endpoints in order
     let candidates = [];
 
-    const headers = { Authorization: `Bearer ${token}` };
     const recentDate = new Date();
     recentDate.setDate(recentDate.getDate() - 7);
     const dateStr = recentDate.toISOString().slice(0, 10);
 
     try {
-      const r = await axios.get(`${CM_BASE}/charts/spotify/artists`, {
-        headers, params: { genre: primaryGenre, date: dateStr, limit: 50 },
-      });
+      const r = await cmGet(token, '/charts/spotify/artists', { genre: primaryGenre, date: dateStr, limit: 50 });
       candidates = r.data?.obj || [];
     } catch { /* try next */ }
 
     if (!candidates.length) {
       try {
-        const r = await axios.get(`${CM_BASE}/artist/list`, {
-          headers, params: { genre: primaryGenre, limit: 50, offset: 0 },
-        });
+        const r = await cmGet(token, '/artist/list', { genre: primaryGenre, limit: 50, offset: 0 });
         candidates = r.data?.obj || [];
       } catch { /* try next */ }
     }
 
     if (!candidates.length) {
-      const r = await axios.get(`${CM_BASE}/search`, {
-        headers, params: { q: primaryGenre, type: 'artists', limit: 50 },
-      });
+      const r = await cmGet(token, '/search', { q: primaryGenre, type: 'artists', limit: 50 });
       candidates = r.data?.obj?.artists || r.data?.obj || [];
     }
 
