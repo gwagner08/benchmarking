@@ -6,6 +6,13 @@ const state = {
   activeTab: 'overview',
   loading: new Set(),
   timeRange: 30,
+  comps: {
+    suggestions: [],
+    meta: null,
+    band: 'peer',
+    refId: null,
+    loading: false,
+  },
 };
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -107,8 +114,12 @@ async function addArtist(artist) {
   try {
     entry.stats = await API.getAllStats(artist.id, state.timeRange);
     entry.momentum = Momentum.computeMomentum(entry.stats, state.weights);
+    // Auto-set reference artist to first one added
+    if (!state.comps.refId) state.comps.refId = artist.id;
     renderAll();
     showToast(`${artist.name} added`, 'success');
+    // Load comps when reference artist's data is ready
+    if (state.comps.refId === artist.id) loadComps();
   } catch (err) {
     showToast(`Failed to load stats for ${artist.name}: ${err.message}`, 'error');
     state.roster = state.roster.filter(a => a.id !== artist.id);
@@ -120,7 +131,119 @@ async function addArtist(artist) {
 
 function removeArtist(id) {
   state.roster = state.roster.filter(a => a.id !== id);
+  // Reset ref to first remaining artist if the ref was removed
+  if (state.comps.refId === id) {
+    state.comps.refId = state.roster[0]?.id ?? null;
+    state.comps.suggestions = [];
+    state.comps.meta = null;
+    if (state.comps.refId) loadComps();
+  }
   renderAll();
+}
+
+// ── Comp suggestions ──────────────────────────────────────────────────────────
+
+async function loadComps() {
+  const refId = state.comps.refId;
+  if (!refId) return;
+  state.comps.loading = true;
+  renderComps();
+  try {
+    const data = await API.getComps(refId, state.comps.band);
+    state.comps.suggestions = data?.obj || [];
+    state.comps.meta = data?.meta || null;
+  } catch (err) {
+    showToast('Could not load comp suggestions: ' + err.message, 'error');
+    state.comps.suggestions = [];
+  } finally {
+    state.comps.loading = false;
+    renderComps();
+  }
+}
+
+function setCompBand(band) {
+  state.comps.band = band;
+  loadComps();
+}
+
+function setCompRef(id) {
+  state.comps.refId = +id;
+  state.comps.suggestions = [];
+  loadComps();
+}
+
+function renderComps() {
+  const el = document.getElementById('comp-suggestions');
+  if (!el) return;
+
+  if (!state.roster.length) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+
+  // Reference artist selector
+  const refOptions = state.roster.map(a =>
+    `<option value="${a.id}" ${a.id === state.comps.refId ? 'selected' : ''}>${a.name}</option>`
+  ).join('');
+
+  // Band selector
+  const bands = [
+    { key: 'smaller', label: 'Smaller Acts' },
+    { key: 'peer',    label: 'Peer Tier' },
+    { key: 'larger',  label: 'Larger Acts' },
+  ];
+  const bandBtns = bands.map(b =>
+    `<button class="band-btn ${state.comps.band === b.key ? 'active' : ''}"
+      onclick="setCompBand('${b.key}')">${b.label}</button>`
+  ).join('');
+
+  // Meta line
+  const meta = state.comps.meta;
+  const metaLine = meta
+    ? `<span class="comp-meta-text">Genre: <strong>${Array.isArray(meta.allGenres) ? meta.allGenres.slice(0, 3).join(', ') : meta.genre}</strong> &nbsp;·&nbsp; Audience: <strong>${num(meta.minL)}–${num(meta.maxL)}</strong> monthly listeners</span>`
+    : '';
+
+  // Suggestion cards
+  let gridContent;
+  if (state.comps.loading) {
+    gridContent = '<div class="comp-loading">Finding comps…</div>';
+  } else if (!state.comps.suggestions.length) {
+    gridContent = `<div class="comp-empty">${meta?.reason || 'No comps found for this genre + size range. Try a different tier.'}</div>`;
+  } else {
+    const alreadyAdded = new Set(state.roster.map(a => a.id));
+    gridContent = state.comps.suggestions.map(a => {
+      const isAdded = alreadyAdded.has(a.id);
+      const genres = (a.tags || a.genres || []).slice(0, 2).join(', ');
+      return `
+        <div class="comp-card">
+          <img src="${a.image_url || ''}" onerror="this.style.display='none'" class="comp-img" alt="">
+          <div class="comp-info">
+            <span class="comp-name">${a.name}</span>
+            <span class="comp-genre">${genres || meta?.genre || ''}</span>
+            <span class="comp-listeners">${num(a.sp_monthly_listeners)} listeners</span>
+          </div>
+          <button class="comp-add-btn ${isAdded ? 'added' : ''}"
+            onclick="${isAdded ? '' : `addArtist({id:${a.id},name:'${a.name.replace(/'/g, "\\'")}',image:'${a.image_url || ''}'})`}"
+            ${isAdded ? 'disabled' : ''}>
+            ${isAdded ? '✓' : '+'}
+          </button>
+        </div>
+      `;
+    }).join('');
+  }
+
+  el.innerHTML = `
+    <div class="comp-header">
+      <span class="section-title" style="margin:0">Suggested Comps</span>
+      <div class="comp-controls">
+        <label class="comp-ref-label">Based on
+          <select onchange="setCompRef(this.value)" class="comp-ref-select">${refOptions}</select>
+        </label>
+        <div class="band-selector">${bandBtns}</div>
+        <button class="comp-refresh-btn" onclick="loadComps()" title="Refresh">↻</button>
+      </div>
+    </div>
+    ${metaLine ? `<div class="comp-meta-line">${metaLine}</div>` : ''}
+    <div class="comp-grid">${gridContent}</div>
+  `;
 }
 
 // ── Render ─────────────────────────────────────────────────────────────────────
@@ -131,6 +254,7 @@ function renderAll() {
   renderStreamingTab();
   renderSocialTab();
   renderMomentumTab();
+  renderComps();
 }
 
 function renderRoster() {

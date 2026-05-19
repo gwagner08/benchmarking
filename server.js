@@ -44,6 +44,88 @@ app.get('/cm/*', async (req, res) => {
   }
 });
 
+// Comp suggestions: genre + audience size matching
+app.get('/comps/:artistId', async (req, res) => {
+  try {
+    const token = await getToken();
+    const artistId = +req.params.artistId;
+    const band = req.query.band || 'peer';
+
+    // Step 1: reference artist metadata
+    const metaRes = await axios.get(`${CM_BASE}/artist/${artistId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const artist = metaRes.data?.obj;
+    const tags = artist?.tags || artist?.genres || artist?.cm_tags || [];
+    const listeners = artist?.sp_monthly_listeners || 0;
+
+    if (!tags.length) {
+      return res.json({ obj: [], meta: { reason: 'No genre data for this artist' } });
+    }
+
+    const primaryGenre = Array.isArray(tags) ? tags[0] : tags;
+
+    const BANDS = {
+      smaller: { min: 0.10, max: 0.70 },
+      peer:    { min: 0.40, max: 2.50 },
+      larger:  { min: 1.50, max: 8.00 },
+    };
+    const { min, max } = BANDS[band] || BANDS.peer;
+    const minL = listeners * min;
+    const maxL = listeners * max;
+
+    // Step 2: genre-filtered artist candidates — try three endpoints in order
+    let candidates = [];
+
+    const headers = { Authorization: `Bearer ${token}` };
+    const recentDate = new Date();
+    recentDate.setDate(recentDate.getDate() - 7);
+    const dateStr = recentDate.toISOString().slice(0, 10);
+
+    try {
+      const r = await axios.get(`${CM_BASE}/charts/spotify/artists`, {
+        headers, params: { genre: primaryGenre, date: dateStr, limit: 50 },
+      });
+      candidates = r.data?.obj || [];
+    } catch { /* try next */ }
+
+    if (!candidates.length) {
+      try {
+        const r = await axios.get(`${CM_BASE}/artist/list`, {
+          headers, params: { genre: primaryGenre, limit: 50, offset: 0 },
+        });
+        candidates = r.data?.obj || [];
+      } catch { /* try next */ }
+    }
+
+    if (!candidates.length) {
+      const r = await axios.get(`${CM_BASE}/search`, {
+        headers, params: { q: primaryGenre, type: 'artists', limit: 50 },
+      });
+      candidates = r.data?.obj?.artists || r.data?.obj || [];
+    }
+
+    const suggestions = candidates
+      .filter(a => a.id !== artistId)
+      .filter(a => {
+        const l = a.sp_monthly_listeners || 0;
+        return l >= minL && l <= maxL;
+      })
+      .sort((a, b) => (b.sp_monthly_listeners || 0) - (a.sp_monthly_listeners || 0))
+      .slice(0, 8);
+
+    res.json({
+      obj: suggestions,
+      meta: { genre: primaryGenre, allGenres: tags, referenceListeners: listeners, band, minL, maxL },
+    });
+  } catch (err) {
+    const status = err.response?.status || 500;
+    const message = err.response?.data?.message || err.message;
+    console.error(`[comps] ${req.params.artistId} → ${status}: ${message}`);
+    res.status(status).json({ error: message });
+  }
+});
+
 // Health check
 app.get('/health', (req, res) => res.json({ ok: true }));
 

@@ -48,6 +48,10 @@ const API = {
     return get(`/artist/${id}/stat/youtube`, dateRange(days));
   },
 
+  getComps(artistId, band = 'peer') {
+    return fetch(`/comps/${artistId}?band=${band}`).then(r => r.json());
+  },
+
   // Fetch all platform stats in parallel
   async getAllStats(id, days = 90) {
     const [spotify, instagram, tiktok, youtube] = await Promise.allSettled([
