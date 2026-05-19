@@ -103,12 +103,32 @@ app.get('/cm/*', async (req, res) => {
     const token = await getToken();
     const cmPath = req.path.replace(/^\/cm/, '');
     const response = await cmGet(token, cmPath, req.query);
+
+    // Log shape of stat responses to help diagnose field name mismatches
+    if (cmPath.includes('/stat/')) {
+      const obj = response.data?.obj;
+      const sample = Array.isArray(obj) ? obj[0] : obj;
+      console.log(`[debug] ${cmPath} → obj type: ${Array.isArray(obj) ? 'array' : typeof obj}, sample keys: ${sample ? Object.keys(sample).join(', ') : 'none'}`);
+    }
+
     res.json(response.data);
   } catch (err) {
     const status = err.response?.status || 500;
     const message = err.response?.data?.message || err.message;
     console.error(`[proxy] ${req.path} → ${status}: ${message}`);
     res.status(status).json({ error: message });
+  }
+});
+
+// Raw diagnostic: returns unmodified Chartmetric response for any path
+app.get('/debug/*', async (req, res) => {
+  try {
+    const token = await getToken();
+    const cmPath = req.path.replace(/^\/debug/, '');
+    const response = await cmGet(token, cmPath, req.query);
+    res.json(response.data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.message, raw: err.response?.data });
   }
 });
 
