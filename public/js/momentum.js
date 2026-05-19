@@ -16,7 +16,7 @@ function normalize(pctChange, sensitivity = 0.25) {
 }
 
 function growthRate(series, field) {
-  if (!series || series.length < 2) return null;
+  if (!Array.isArray(series) || series.length < 2) return null;
   const sorted = [...series].sort((a, b) => new Date(a.timestp) - new Date(b.timestp));
   const first = sorted[0][field];
   const last = sorted[sorted.length - 1][field];

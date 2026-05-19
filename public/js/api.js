@@ -23,6 +23,14 @@ function dateRange(days = 30) {
   };
 }
 
+// Chartmetric sometimes returns obj as an object or null instead of an array
+function toArray(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  if (Array.isArray(val.data)) return val.data;
+  return [];
+}
+
 const API = {
   searchArtists(query) {
     return get('/search', { q: query, type: 'artists', limit: 10 });
@@ -52,19 +60,26 @@ const API = {
     return fetch(`/comps/${artistId}?band=${band}`).then(r => r.json());
   },
 
-  // Fetch all platform stats in parallel
+  // Fetch platform stats with a small stagger to avoid 429s
   async getAllStats(id, days = 90) {
-    const [spotify, instagram, tiktok, youtube] = await Promise.allSettled([
-      API.getSpotifyStats(id, days),
-      API.getInstagramStats(id, days),
-      API.getTikTokStats(id, days),
-      API.getYouTubeStats(id, days),
+    const delay = ms => new Promise(r => setTimeout(r, ms));
+    const settle = fn => fn().then(v => ({ ok: true, v })).catch(() => ({ ok: false }));
+
+    const [spotify, , instagram, , tiktok, , youtube] = await Promise.all([
+      settle(() => API.getSpotifyStats(id, days)),
+      delay(250),
+      settle(() => API.getInstagramStats(id, days)),
+      delay(250),
+      settle(() => API.getTikTokStats(id, days)),
+      delay(250),
+      settle(() => API.getYouTubeStats(id, days)),
     ]);
+
     return {
-      spotify: spotify.status === 'fulfilled' ? (spotify.value?.obj || []) : [],
-      instagram: instagram.status === 'fulfilled' ? (instagram.value?.obj || []) : [],
-      tiktok: tiktok.status === 'fulfilled' ? (tiktok.value?.obj || []) : [],
-      youtube: youtube.status === 'fulfilled' ? (youtube.value?.obj || []) : [],
+      spotify:   toArray(spotify.ok   ? spotify.v?.obj   : null),
+      instagram: toArray(instagram.ok ? instagram.v?.obj : null),
+      tiktok:    toArray(tiktok.ok    ? tiktok.v?.obj    : null),
+      youtube:   toArray(youtube.ok   ? youtube.v?.obj   : null),
     };
   },
 };

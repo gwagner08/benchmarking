@@ -26,15 +26,34 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Proxy all /cm/* requests to Chartmetric API
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Proxy all /cm/* requests to Chartmetric API — retries once on 429
 app.get('/cm/*', async (req, res) => {
   try {
     const token = await getToken();
     const cmPath = req.path.replace(/^\/cm/, '');
-    const response = await axios.get(`${CM_BASE}${cmPath}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      params: req.query,
-    });
+
+    let response;
+    try {
+      response = await axios.get(`${CM_BASE}${cmPath}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: req.query,
+      });
+    } catch (err) {
+      if (err.response?.status === 429) {
+        const retryAfter = +(err.response.headers['retry-after'] || 2);
+        console.warn(`[proxy] 429 on ${cmPath} — retrying in ${retryAfter}s`);
+        await sleep(retryAfter * 1000);
+        response = await axios.get(`${CM_BASE}${cmPath}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          params: req.query,
+        });
+      } else {
+        throw err;
+      }
+    }
+
     res.json(response.data);
   } catch (err) {
     const status = err.response?.status || 500;
