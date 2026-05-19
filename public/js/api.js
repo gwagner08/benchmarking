@@ -23,12 +23,26 @@ function dateRange(days = 30) {
   };
 }
 
-// Chartmetric sometimes returns obj as an object or null instead of an array
-function toArray(val) {
-  if (!val) return [];
-  if (Array.isArray(val)) return val;
-  if (Array.isArray(val.data)) return val.data;
-  return [];
+// Chartmetric stat responses come in two shapes:
+//   1. Flat array:    [{ timestp, followers, listeners, ... }]
+//   2. Nested object: { followers: [{timestp, followers}], listeners: [{timestp, listeners}], ... }
+// Normalise both to a flat array with all fields merged by timestp.
+function normalizeStats(obj) {
+  if (!obj) return [];
+  if (Array.isArray(obj)) return obj;
+
+  // Nested object — merge all series by date key
+  const byDate = {};
+  for (const [field, series] of Object.entries(obj)) {
+    if (!Array.isArray(series)) continue;
+    for (const entry of series) {
+      const ts = entry.timestp || entry.date;
+      if (!ts) continue;
+      if (!byDate[ts]) byDate[ts] = { timestp: ts };
+      byDate[ts][field] = entry[field] ?? entry.value;
+    }
+  }
+  return Object.values(byDate).sort((a, b) => new Date(a.timestp) - new Date(b.timestp));
 }
 
 const API = {
@@ -53,7 +67,8 @@ const API = {
   },
 
   getYouTubeStats(id, days = 90) {
-    return get(`/artist/${id}/stat/youtube`, dateRange(days));
+    // Chartmetric uses 'youtube_channel' as the dsrc, not 'youtube'
+    return get(`/artist/${id}/stat/youtube_channel`, dateRange(days));
   },
 
   getComps(artistId, band = 'peer') {
@@ -70,10 +85,10 @@ const API = {
       settle(() => API.getYouTubeStats(id, days)),
     ]);
     return {
-      spotify:   toArray(spotify.ok   ? spotify.v?.obj   : null),
-      instagram: toArray(instagram.ok ? instagram.v?.obj : null),
-      tiktok:    toArray(tiktok.ok    ? tiktok.v?.obj    : null),
-      youtube:   toArray(youtube.ok   ? youtube.v?.obj   : null),
+      spotify:   normalizeStats(spotify.ok   ? spotify.v?.obj   : null),
+      instagram: normalizeStats(instagram.ok ? instagram.v?.obj : null),
+      tiktok:    normalizeStats(tiktok.ok    ? tiktok.v?.obj    : null),
+      youtube:   normalizeStats(youtube.ok   ? youtube.v?.obj   : null),
     };
   },
 };

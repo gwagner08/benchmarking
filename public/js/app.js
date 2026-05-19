@@ -285,7 +285,7 @@ function renderOverview() {
   grid.innerHTML = state.roster.map((a, i) => {
     const m = a.momentum;
     const { label, color } = Momentum.momentumLabel(m?.score ?? null);
-    const sp = last(a.stats?.spotify, 'monthly_listeners');
+    const sp = last(a.stats?.spotify, 'listeners');
     const spF = last(a.stats?.spotify, 'followers');
     const ig = last(a.stats?.instagram, 'followers');
     const tt = last(a.stats?.tiktok, 'followers');
@@ -334,7 +334,7 @@ function renderStreamingTab() {
   const withStats = state.roster.filter(a => a.stats?.spotify?.length);
   Charts.renderLineChart('chart-sp-listeners', null,
     withStats.map(a => ({ name: a.name, series: a.stats.spotify })),
-    'monthly_listeners');
+    'listeners');
   Charts.renderLineChart('chart-sp-followers', null,
     withStats.map(a => ({ name: a.name, series: a.stats.spotify })),
     'followers');

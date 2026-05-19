@@ -28,7 +28,7 @@ function computeMomentum(stats, weights = DEFAULT_WEIGHTS) {
   const total = Object.values(weights).reduce((s, w) => s + w, 0);
 
   const signals = {
-    sp_listeners: growthRate(stats.spotify, 'monthly_listeners'),
+    sp_listeners: growthRate(stats.spotify, 'listeners'),
     sp_followers: growthRate(stats.spotify, 'followers'),
     tiktok:       growthRate(stats.tiktok, 'followers'),
     instagram:    growthRate(stats.instagram, 'followers'),
