@@ -267,6 +267,28 @@ app.post('/sprout/posts', async (req, res) => {
   }
 });
 
+// Debug: returns raw Sprout analytics for first profile to diagnose response shape
+app.get('/sprout/debug-analytics', async (req, res) => {
+  try {
+    const cid = SPROUT_CUSTOMER_ID;
+    const headers = sproutHeaders();
+    const profilesRes = await axios.get(`${SPROUT_BASE}/${cid}/metadata/customer`, { headers });
+    const profiles = profilesRes.data?.data || [];
+    const firstId = profiles[0]?.customer_profile_id || profiles[0]?.id;
+    if (!firstId) return res.json({ error: 'No profiles found', profiles });
+    const until = new Date().toISOString().slice(0, 10);
+    const since = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const body = {
+      filters: { customer_profile_ids: [firstId], reporting_period: { since, until } },
+      metrics: ['impressions', 'engagements', 'followers_gained', 'reach', 'video_views'],
+    };
+    const r = await axios.post(`${SPROUT_BASE}/${cid}/analytics/profiles`, body, { headers });
+    res.json({ profile_id: firstId, since, until, raw: r.data });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.message, raw: err.response?.data });
+  }
+});
+
 // Health check
 app.get('/health', (req, res) => res.json({ ok: true }));
 
