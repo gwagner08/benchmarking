@@ -73,7 +73,7 @@
   // ── State
   let artists = [];
   let currentArtist = null;
-  let filterGroup = '';
+  let filterGroup = 'Mick Management';
 
   // ── DOM
   const summaryEl   = document.getElementById('roster-summary');
@@ -238,18 +238,28 @@
     if (!allProfileIds.length) { setStatus('Ready (no profile IDs)', true); return; }
     try {
       const data = await API.getSproutAnalytics(allProfileIds, 7);
+
+      // Sprout metrics can be scalars OR arrays of {value} time-series points — sum either
+      function mv(val) {
+        if (val == null) return 0;
+        if (typeof val === 'number') return val;
+        if (Array.isArray(val)) return val.reduce((s, v) => s + (typeof v === 'number' ? v : (v?.value || 0)), 0);
+        return 0;
+      }
+
       const byProfile = {};
       (data?.data || []).forEach(row => {
-        // Sprout returns either flat fields or nested {dimensions, metrics}
+        // Support flat fields OR nested {dimensions, metrics}
         const pid = String(row.customer_profile_id ?? row.dimensions?.customer_profile_id ?? '');
         if (!pid) return;
+        const m = row.metrics || row;
         byProfile[pid] = {
-          impressions:      row.impressions      ?? row.metrics?.impressions      ?? 0,
-          engagements:      row.engagements      ?? row.metrics?.engagements      ?? 0,
-          reach:            row.reach            ?? row.metrics?.reach            ?? 0,
-          video_views:      row.video_views      ?? row.metrics?.video_views      ?? 0,
-          followers_gained: row.followers_gained ?? row.metrics?.followers_gained ?? 0,
-          followers:        row.followers        ?? row.metrics?.followers        ?? 0,
+          impressions:      mv(m.impressions),
+          engagements:      mv(m.engagements),
+          reach:            mv(m.reach),
+          video_views:      mv(m.video_views),
+          followers_gained: mv(m.followers_gained),
+          followers:        mv(m.followers),
         };
       });
       visible.forEach(artist => {
@@ -277,7 +287,12 @@
     }
   }
 
-  if (groupFilter) groupFilter.addEventListener('change', () => { filterGroup = groupFilter.value; renderSummary(); renderGrid(); });
+  if (groupFilter) groupFilter.addEventListener('change', () => {
+    filterGroup = groupFilter.value;
+    renderSummary();
+    renderGrid();
+    loadAnalytics();
+  });
   if (refreshBtn)  refreshBtn.addEventListener('click',  () => { artists = []; load(); });
 
   window.Roster = { load };
