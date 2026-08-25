@@ -239,11 +239,24 @@
     try {
       const data = await API.getSproutAnalytics(allProfileIds, 7);
       const byProfile = {};
-      (data?.data || []).forEach(row => { byProfile[row.customer_profile_id] = row; });
+      (data?.data || []).forEach(row => {
+        // Sprout returns either flat fields or nested {dimensions, metrics}
+        const pid = String(row.customer_profile_id ?? row.dimensions?.customer_profile_id ?? '');
+        if (!pid) return;
+        byProfile[pid] = {
+          impressions:      row.impressions      ?? row.metrics?.impressions      ?? 0,
+          engagements:      row.engagements      ?? row.metrics?.engagements      ?? 0,
+          reach:            row.reach            ?? row.metrics?.reach            ?? 0,
+          video_views:      row.video_views      ?? row.metrics?.video_views      ?? 0,
+          followers_gained: row.followers_gained ?? row.metrics?.followers_gained ?? 0,
+          followers:        row.followers        ?? row.metrics?.followers        ?? 0,
+        };
+      });
       visible.forEach(artist => {
         let imp = 0, eng = 0, reach = 0, vv = 0, growth = 0, followers = 0;
         artist.profiles.forEach(p => {
-          const row = byProfile[p.customer_profile_id || p.id];
+          const pid = String(p.customer_profile_id || p.id || '');
+          const row = byProfile[pid];
           if (!row) return;
           imp      += row.impressions      || 0;
           eng      += row.engagements      || 0;
