@@ -1,4 +1,4 @@
-// Thin client that talks to our Express proxy at /cm/*
+// Thin client that talks to our Express proxy at /cm/* and /sprout/*
 
 const BASE = '/cm';
 
@@ -31,7 +31,6 @@ function normalizeStats(obj) {
   if (!obj) return [];
   if (Array.isArray(obj)) return obj;
 
-  // Nested object — merge all series by date key
   const byDate = {};
   for (const [field, series] of Object.entries(obj)) {
     if (!Array.isArray(series)) continue;
@@ -73,6 +72,32 @@ const API = {
 
   getComps(artistId, band = 'peer') {
     return fetch(`/comps/${artistId}?band=${band}`).then(r => r.json());
+  },
+
+  // ── Sprout Social ─────────────────────────────────────────────────────────
+
+  getSproutRoster() {
+    return fetch('/sprout/roster').then(r => r.json());
+  },
+
+  getSproutAnalytics(profileIds, days = 7) {
+    const until = new Date().toISOString().slice(0, 10);
+    const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    return fetch('/sprout/analytics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile_ids: profileIds, since, until }),
+    }).then(r => r.json());
+  },
+
+  getSproutPosts(profileIds, days = 7) {
+    const until = new Date().toISOString().slice(0, 10);
+    const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    return fetch('/sprout/posts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile_ids: profileIds, since, until }),
+    }).then(r => r.json());
   },
 
   // Fetch all platform stats — fire in parallel, server queue serializes them

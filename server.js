@@ -27,10 +27,8 @@ async function getToken() {
 }
 
 // ── Rate-limited Chartmetric queue ────────────────────────────────────────────
-// Serializes all outbound CM requests with CM_INTERVAL ms between each,
-// which prevents 429s instead of just recovering from them.
 
-const CM_INTERVAL = 750; // ms between requests
+const CM_INTERVAL = 750;
 
 class CmQueue {
   constructor(interval) {
@@ -59,7 +57,6 @@ class CmQueue {
 
 const cmQueue = new CmQueue(CM_INTERVAL);
 
-// All Chartmetric requests go through here — queued + one retry on 429
 async function cmGet(token, path, params = {}) {
   return cmQueue.enqueue(() => _cmRequest(token, path, params));
 }
@@ -74,8 +71,6 @@ async function _cmRequest(token, path, params = {}) {
     return await request();
   } catch (err) {
     if (err.response?.status !== 429) throw err;
-
-    // Retry-After may be a Unix timestamp or seconds-to-wait
     const raw = err.response.headers['retry-after'];
     let waitMs = 2000;
     if (raw) {
@@ -104,7 +99,6 @@ app.get('/cm/*', async (req, res) => {
     const cmPath = req.path.replace(/^\/cm/, '');
     const response = await cmGet(token, cmPath, req.query);
 
-    // Log shape of stat responses to help diagnose field name mismatches
     if (cmPath.includes('/stat/')) {
       const obj = response.data?.obj;
       const sample = Array.isArray(obj) ? obj[0] : obj;
@@ -120,7 +114,7 @@ app.get('/cm/*', async (req, res) => {
   }
 });
 
-// Raw diagnostic: returns unmodified Chartmetric response for any path
+// Raw diagnostic
 app.get('/debug/*', async (req, res) => {
   try {
     const token = await getToken();
@@ -132,14 +126,13 @@ app.get('/debug/*', async (req, res) => {
   }
 });
 
-// Comp suggestions: genre + audience size matching
+// Comp suggestions
 app.get('/comps/:artistId', async (req, res) => {
   try {
     const token = await getToken();
     const artistId = +req.params.artistId;
     const band = req.query.band || 'peer';
 
-    // Step 1: reference artist metadata (goes through the queue like everything else)
     const metaRes = await cmGet(token, `/artist/${artistId}`);
     const artist = metaRes.data?.obj;
     const tags = artist?.tags || artist?.genres || artist?.cm_tags || [];
@@ -160,7 +153,6 @@ app.get('/comps/:artistId', async (req, res) => {
     const minL = listeners * min;
     const maxL = listeners * max;
 
-    // Step 2: genre-filtered candidates — try three endpoints in order
     let candidates = [];
 
     const recentDate = new Date();
@@ -186,10 +178,7 @@ app.get('/comps/:artistId', async (req, res) => {
 
     const suggestions = candidates
       .filter(a => a.id !== artistId)
-      .filter(a => {
-        const l = a.sp_monthly_listeners || 0;
-        return l >= minL && l <= maxL;
-      })
+      .filter(a => { const l = a.sp_monthly_listeners || 0; return l >= minL && l <= maxL; })
       .sort((a, b) => (b.sp_monthly_listeners || 0) - (a.sp_monthly_listeners || 0))
       .slice(0, 8);
 
@@ -205,9 +194,82 @@ app.get('/comps/:artistId', async (req, res) => {
   }
 });
 
+// ── Sprout Social proxy ───────────────────────────────────────────────────────
+
+const SPROUT_BASE = 'https://api.sproutsocial.com/v1';
+const SPROUT_CUSTOMER_ID = process.env.SPROUT_CUSTOMER_ID || '2447399';
+
+function sproutHeaders() {
+  const token = process.env.SPROUT_TOKEN;
+  if (!token) throw new Error('SPROUT_TOKEN not set in .env');
+  return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+}
+
+// GET /sprout/roster — profiles + groups from Sprout
+app.get('/sprout/roster', async (req, res) => {
+  try {
+    const cid = SPROUT_CUSTOMER_ID;
+    const headers = sproutHeaders();
+    const [profilesRes, groupsRes] = await Promise.all([
+      axios.get(`${SPROUT_BASE}/${cid}/metadata/customer`, { headers }),
+      axios.get(`${SPROUT_BASE}/${cid}/metadata/customer/groups`, { headers }),
+    ]);
+    res.json({ profiles: profilesRes.data?.data || [], groups: groupsRes.data?.data || [] });
+  } catch (err) {
+    const status = err.response?.status || 500;
+    console.error('[sprout/roster]', err.message);
+    res.status(status).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
+// POST /sprout/analytics — profile analytics for a given period
+app.post('/sprout/analytics', async (req, res) => {
+  try {
+    const cid = SPROUT_CUSTOMER_ID;
+    const headers = sproutHeaders();
+    const { profile_ids, since, until, metrics } = req.body;
+    const body = {
+      filters: {
+        customer_profile_ids: profile_ids,
+        reporting_period: { since, until },
+      },
+      metrics: metrics || ['impressions', 'engagements', 'followers_gained', 'reach', 'video_views', 'post_count'],
+    };
+    const r = await axios.post(`${SPROUT_BASE}/${cid}/analytics/profiles`, body, { headers });
+    res.json(r.data);
+  } catch (err) {
+    const status = err.response?.status || 500;
+    console.error('[sprout/analytics]', err.message);
+    res.status(status).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
+// POST /sprout/posts — recent posts for given profiles
+app.post('/sprout/posts', async (req, res) => {
+  try {
+    const cid = SPROUT_CUSTOMER_ID;
+    const headers = sproutHeaders();
+    const { profile_ids, since, until } = req.body;
+    const body = {
+      filters: {
+        customer_profile_ids: profile_ids,
+        created_time: { since, until },
+      },
+      sort_by: 'impressions',
+      limit: 10,
+    };
+    const r = await axios.post(`${SPROUT_BASE}/${cid}/analytics/posts`, body, { headers });
+    res.json(r.data);
+  } catch (err) {
+    const status = err.response?.status || 500;
+    console.error('[sprout/posts]', err.message);
+    res.status(status).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
 // Health check
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 app.listen(PORT, () => {
-  console.log(`Benchmarking dashboard → http://localhost:${PORT}`);
+  console.log(`Firebird workspace → http://localhost:${PORT}`);
 });
